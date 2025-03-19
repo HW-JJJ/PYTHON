@@ -1,0 +1,91 @@
+from flask import Flask, render_template
+import sqlite3
+import pandas as pd
+
+app = Flask(__name__, template_folder="templates")
+
+# DB 초기화 함수
+def initialize_database(db_file):
+    """DB 파일을 유지하면서 contact 테이블이 없으면 생성"""
+    
+    # 주어진 DB 파일에 연결
+    conn = sqlite3.connect(db_file)
+    curs = conn.cursor()
+
+    # contact 테이블이 존재하는지 확인
+    curs.execute("""
+    SELECT name FROM sqlite_master WHERE type='table' AND name='contact'
+    """)
+    table_exists = curs.fetchone()
+
+    # contact 테이블이 없으면 새로 생성
+    if not table_exists:
+        curs.execute("""
+        CREATE TABLE contact (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            article TEXT NOT NULL
+        )
+        """)
+
+    # 변경사항을 커밋하고 DB 연결을 닫음
+    conn.commit()
+    conn.close()
+
+# 모든 카테고리의 DB 파일 초기화
+db_files = {
+    "정치": "politics.db",
+    "경제": "economy.db",
+    "사회": "society.db",
+    "문화/생활": "culture.db",
+    "IT/과학": "it_science.db",
+    "세계": "world.db"
+}
+
+# 각 카테고리의 DB 파일에 대해 initialize_database 함수를 호출
+for db_file in db_files.values():
+    initialize_database(db_file)
+
+# 카테고리에 맞는 DB 파일 반환
+def get_db_file(category):
+    """카테고리에 맞는 DB 파일 경로 반환, 기본값은 'default.db'"""
+    return db_files.get(category, "default.db")
+
+# 선택한 카테고리의 기사 가져오기
+def get_articles_from_db(category):
+    db_file = get_db_file(category)
+    
+    # 해당 카테고리에 맞는 DB 파일에 연결
+    conn = sqlite3.connect(db_file)
+    
+    # contact 테이블에서 title과 article 컬럼 가져오기
+    sql = "SELECT title, article FROM contact"
+    df = pd.read_sql(sql, conn)
+    conn.close()
+
+    # 기사가 없으면 빈 리스트 반환
+    if df.empty:
+        return []
+
+    # 기사 10개 랜덤 선택 후 3개만 반환
+    selected_articles = df.sample(n=min(3, len(df))).to_dict(orient="records")
+    
+    return selected_articles
+
+# 홈 페이지 (카테고리 선택 버튼 표시)
+@app.route("/")
+def index():
+    # 카테고리 목록을 index.html로 전달
+    categories = list(db_files.keys())
+    return render_template("index.html", categories=categories)
+
+# 카테고리 선택 시 해당 기사 보여주기
+@app.route("/category/<category_name>")
+def show_articles(category_name):
+    # 선택한 카테고리에 해당하는 기사들을 가져옴
+    articles = get_articles_from_db(category_name)
+    # articles.html 템플릿에 카테고리명과 기사 전달
+    return render_template("articles.html", category=category_name, articles=articles)
+
+if __name__ == "__main__":
+    app.run(debug=True)
